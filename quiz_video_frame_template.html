@@ -16,6 +16,11 @@
     .topbar { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:#16171d; border-bottom:1px solid #232530; height:56px; }
     .topbar-title { font-size:14px; font-weight:800; color:#fff; background:linear-gradient(45deg, #ffd700, #ff8c00); -webkit-background-clip:text; -webkit-text-fill-color:transparent; letter-spacing:0.3px; }
     .topbar-subtitle { font-size:10px; color:#5c6070; margin-top:2px; }
+    .topbar-btn { padding:8px 16px; border-radius:8px; border:none; background:linear-gradient(135deg, #ffd700, #ff8c00); color:#000; font-family:'Inter',sans-serif; font-size:11px; font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(255, 140, 0, 0.25); transition:all 0.15s; }
+    .topbar-btn:hover { transform:scale(1.02); box-shadow:0 6px 16px rgba(255, 140, 0, 0.4); }
+    .topbar-action-btn { padding:8px 12px; border-radius:8px; border:1px solid #2d3142; background:#1e2029; color:#c5cbd8; font-family:'Inter',sans-serif; font-size:11px; font-weight:600; cursor:pointer; transition:all 0.12s; margin-right:6px; }
+    .topbar-action-btn:hover:not(:disabled) { background:#232530; color:#fff; border-color:#3a3f58; }
+    .topbar-action-btn:disabled { opacity:0.4; cursor:not-allowed; }
 
     /* ═══ TAB NAV ═══ */
     .tab-strip { display:flex; gap:6px; padding:8px 16px; background:#101115; border-bottom:1px solid #1a1b21; overflow-x:auto; }
@@ -198,7 +203,9 @@
     <div class="topbar-title">Quiz Video Editor</div>
     <div class="topbar-subtitle">Click any element to select • Double-click text to edit • Drag to move</div>
   </div>
-  <div>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <button class="topbar-action-btn" id="undoBtn" onclick="undo()" title="Undo (Ctrl+Z)" disabled>↩️ Undo</button>
+    <button class="topbar-action-btn" id="redoBtn" onclick="redo()" title="Redo (Ctrl+Y)" disabled>↪️ Redo</button>
     <button class="topbar-btn" onclick="startVideoExport()">🎬 Export Video</button>
   </div>
 </div>
@@ -283,8 +290,12 @@
         </div>
       </div>
       <div id="bgImgOpts" style="display:none;">
-        <div class="pp-row">
+        <div class="pp-row" style="margin-bottom:8px;">
           <button class="pp-btn primary" onclick="document.getElementById('bgFileInput').click()">Upload Image</button>
+        </div>
+        <div class="pp-row" style="margin-bottom:12px; gap:6px; align-items:center;">
+          <input type="checkbox" id="bgSetAllImg" style="width:auto; cursor:pointer;">
+          <label for="bgSetAllImg" style="font-size:10px; color:#a0a5b5; font-weight:600; cursor:pointer;">Set image for all pages</label>
         </div>
         <div class="pp-row">
           <span class="pp-label">Brightness</span>
@@ -310,6 +321,13 @@
           <span class="pp-label">Opacity</span>
           <input type="range" class="pp-input" id="bgOpacity" min="0" max="100" value="100" oninput="updateBg()">
           <span class="pp-range-val" id="bgOpacityVal">100%</span>
+        </div>
+        <div class="pp-row" style="margin-top:12px; gap:6px; align-items:center;">
+          <input type="checkbox" id="bgSetAllAdjustments" style="width:auto; cursor:pointer;">
+          <label for="bgSetAllAdjustments" style="font-size:10px; color:#a0a5b5; font-weight:600; cursor:pointer;">Set adjustments for all pages</label>
+        </div>
+        <div class="pp-row" style="margin-top:8px;">
+          <button class="pp-btn danger" style="width:100%; text-align:center;" onclick="resetBgAdjustments()">Reset Adjustments</button>
         </div>
       </div>
     </div>
@@ -392,6 +410,100 @@ let elIdCounter = 0;
 let dragState = null;
 let resizeState = null;
 let pendingImgElId = null;
+
+// ═══ UNDO / REDO SYSTEM ═══
+const undoStack = [];
+const redoStack = [];
+const MAX_HISTORY = 50;
+let initialSnap = null;
+let sliderSnap = null;
+
+function saveState() {
+  const state = {
+    FD: JSON.parse(JSON.stringify(FD)),
+    QD: JSON.parse(JSON.stringify(QD)),
+    curFrame: curFrame,
+    selectedEl: selectedEl
+  };
+  undoStack.push(state);
+  if (undoStack.length > MAX_HISTORY) {
+    undoStack.shift();
+  }
+  redoStack.length = 0;
+  updateUndoRedoButtons();
+}
+
+function captureInitialSnap() {
+  initialSnap = {
+    FD: JSON.parse(JSON.stringify(FD)),
+    QD: JSON.parse(JSON.stringify(QD)),
+    curFrame: curFrame,
+    selectedEl: selectedEl
+  };
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+  const currentState = {
+    FD: JSON.parse(JSON.stringify(FD)),
+    QD: JSON.parse(JSON.stringify(QD)),
+    curFrame: curFrame,
+    selectedEl: selectedEl
+  };
+  redoStack.push(currentState);
+  const prevState = undoStack.pop();
+  restoreState(prevState);
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+  const currentState = {
+    FD: JSON.parse(JSON.stringify(FD)),
+    QD: JSON.parse(JSON.stringify(QD)),
+    curFrame: curFrame,
+    selectedEl: selectedEl
+  };
+  undoStack.push(currentState);
+  const nextState = redoStack.pop();
+  restoreState(nextState);
+}
+
+function restoreState(state) {
+  const selId = state.selectedEl;
+  deselectAll();
+  
+  for (const key in FD) {
+    delete FD[key];
+  }
+  Object.assign(FD, state.FD);
+  
+  QD.length = 0;
+  state.QD.forEach(q => QD.push(q));
+  
+  curFrame = state.curFrame;
+  
+  renderTabs();
+  renderFrame();
+  renderBgControls();
+  renderQTabs();
+  loadQ();
+  
+  if (selId && getElById(selId)) {
+    selectElement(selId);
+  } else {
+    deselectAll();
+  }
+  
+  playTextAnimations();
+  updateUndoRedoButtons();
+}
+
+function updateUndoRedoButtons() {
+  const undoBtn = document.getElementById('undoBtn');
+  const redoBtn = document.getElementById('redoBtn');
+  if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+  if (redoBtn) redoBtn.disabled = redoStack.length === 0;
+}
 
 const FW = 338, FH = 600; // frame dimensions
 
@@ -674,8 +786,19 @@ function createElDom(el) {
     div.style.justifyContent = el.align === 'center' ? 'center' : el.align === 'right' ? 'flex-end' : 'flex-start';
     div.style.whiteSpace = 'pre-wrap';
     div.innerHTML = el.text;
+    if (el.shadowBlur > 0) {
+      div.style.textShadow = `${el.shadowOffsetX??3}px ${el.shadowOffsetY??3}px ${el.shadowBlur}px ${el.shadowColor||'#000000'}`;
+    } else {
+      div.style.textShadow = 'none';
+    }
     div.ondblclick = (e) => { e.stopPropagation(); startTextEdit(div, el); };
   } else if (el.type === 'image') {
+    div.style.borderRadius = (el.borderRadius||0) + 'px';
+    if (el.shadowBlur > 0) {
+      div.style.boxShadow = `${el.shadowOffsetX??3}px ${el.shadowOffsetY??3}px ${el.shadowBlur}px ${el.shadowColor||'#000000'}`;
+    } else {
+      div.style.boxShadow = 'none';
+    }
     if (el.src) {
       const img = document.createElement('img');
       img.src = el.src;
@@ -696,7 +819,12 @@ function createElDom(el) {
 
   // Selection
   div.onmousedown = (e) => { if (curTool === 'select') onElMouseDown(e, el); };
-  div.ontouchstart = (e) => { if (curTool === 'select') onElTouchStart(e, el); };
+  div.ontouchstart = (e) => { 
+    if (curTool === 'select') {
+      e.preventDefault();
+      onElTouchStart(e, el); 
+    } 
+  };
   div.onclick = (e) => { e.stopPropagation(); selectElement(el.id); };
 
   if (selectedEl === el.id) {
@@ -704,7 +832,11 @@ function createElDom(el) {
       const h = document.createElement('div');
       h.className = 'resize-handle ' + pos;
       h.onmousedown = (e) => { e.stopPropagation(); startResize(e, el, pos); };
-      h.ontouchstart = (e) => { e.stopPropagation(); startResizeTouch(e, el, pos); };
+      h.ontouchstart = (e) => { 
+        e.stopPropagation(); 
+        e.preventDefault(); 
+        startResizeTouch(e, el, pos); 
+      };
       div.appendChild(h);
     });
   }
@@ -725,7 +857,11 @@ function startTextEdit(dom, el) {
   const finishEdit = () => {
     dom.contentEditable = 'false';
     dom.style.cursor = 'move';
-    el.text = dom.innerText || dom.textContent;
+    const newText = dom.innerText || dom.textContent;
+    if (el.text !== newText) {
+      saveState();
+      el.text = newText;
+    }
     dom.removeEventListener('blur', finishEdit);
   };
   dom.addEventListener('blur', finishEdit);
@@ -737,6 +873,7 @@ function onElMouseDown(e, el) {
   if (e.target.classList.contains('resize-handle')) return;
   e.preventDefault();
   e.stopPropagation();
+  captureInitialSnap();
   dragState = {
     el,
     startX: e.clientX,
@@ -749,6 +886,7 @@ function onElMouseDown(e, el) {
 
 function onElTouchStart(e, el) {
   if (e.target.classList.contains('resize-handle')) return;
+  captureInitialSnap();
   const touch = e.touches[0];
   dragState = {
     el,
@@ -784,6 +922,9 @@ document.addEventListener('mousemove', (e) => {
 });
 
 document.addEventListener('touchmove', (e) => {
+  if (dragState || resizeState) {
+    e.preventDefault();
+  }
   if (dragState) {
     const touch = e.touches[0];
     const dx = touch.clientX - dragState.startX;
@@ -806,21 +947,39 @@ document.addEventListener('touchmove', (e) => {
     el.x = Math.max(0, nx); el.y = Math.max(0, ny); el.w = nw; el.h = nh;
     renderFrame();
   }
-}, { passive: true });
+}, { passive: false });
 
-document.addEventListener('mouseup', () => {
+function commitDragOrResize() {
+  if (dragState || resizeState) {
+    const state = dragState || resizeState;
+    const el = state.el;
+    const hasChanged = dragState 
+      ? (el.x !== state.origX || el.y !== state.origY)
+      : (el.x !== state.origX || el.y !== state.origY || el.w !== state.origW || el.h !== state.origH);
+    if (hasChanged && initialSnap) {
+      undoStack.push(initialSnap);
+      if (undoStack.length > MAX_HISTORY) undoStack.shift();
+      redoStack.length = 0;
+      updateUndoRedoButtons();
+    }
+  }
   dragState = null;
   resizeState = null;
+  initialSnap = null;
+}
+
+document.addEventListener('mouseup', () => {
+  commitDragOrResize();
 });
 
 document.addEventListener('touchend', () => {
-  dragState = null;
-  resizeState = null;
+  commitDragOrResize();
 });
 
 // ═══ RESIZE ═══
 function startResize(e, el, pos) {
   e.preventDefault();
+  captureInitialSnap();
   resizeState = {
     el,
     pos,
@@ -834,6 +993,7 @@ function startResize(e, el, pos) {
 }
 
 function startResizeTouch(e, el, pos) {
+  captureInitialSnap();
   const touch = e.touches[0];
   resizeState = {
     el,
@@ -876,6 +1036,7 @@ document.getElementById('videoFrame').addEventListener('click', (e) => {
   const y = e.clientY - rect.top;
 
   if (curTool === 'text') {
+    saveState();
     const el = mkEl('text', x-60, y-12, 120, 24, {text:'New Text', fontSize:14, fontWeight:600, color:'#ffffff', align:'center'});
     FD[curFrame].elements.push(el);
     selectElement(el.id);
@@ -883,6 +1044,7 @@ document.getElementById('videoFrame').addEventListener('click', (e) => {
     renderFrame();
     playTextAnimations();
   } else if (curTool === 'image') {
+    saveState();
     const el = mkEl('image', x-50, y-50, 100, 100, {src:'', borderRadius:0, opacity:1});
     FD[curFrame].elements.push(el);
     pendingImgElId = el.id;
@@ -890,18 +1052,21 @@ document.getElementById('videoFrame').addEventListener('click', (e) => {
     document.getElementById('fileInput').click();
     setTool('select');
   } else if (curTool === 'rect') {
+    saveState();
     const el = mkEl('shape', x-50, y-30, 100, 60, {shape:'rect', fill:'rgba(255,255,255,0.1)', stroke:'rgba(255,255,255,0.2)', strokeWidth:1, borderRadius:8, opacity:1});
     FD[curFrame].elements.push(el);
     selectElement(el.id);
     setTool('select');
     renderFrame();
   } else if (curTool === 'circle') {
+    saveState();
     const el = mkEl('shape', x-40, y-40, 80, 80, {shape:'circle', fill:'rgba(255,255,255,0.1)', stroke:'rgba(255,255,255,0.2)', strokeWidth:1, borderRadius:50, opacity:1});
     FD[curFrame].elements.push(el);
     selectElement(el.id);
     setTool('select');
     renderFrame();
   } else if (curTool === 'line') {
+    saveState();
     const el = mkEl('shape', x-60, y-1, 120, 2, {shape:'line', fill:'rgba(255,255,255,0.3)', stroke:'', strokeWidth:0, borderRadius:1, opacity:1});
     FD[curFrame].elements.push(el);
     selectElement(el.id);
@@ -923,6 +1088,7 @@ function handleImgUpload(e) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (ev) => {
+    saveState();
     if (pendingImgElId) {
       const el = getElById(pendingImgElId);
       if (el) el.src = ev.target.result;
@@ -942,11 +1108,49 @@ function handleImgUpload(e) {
 function handleBgUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
+  const setAllImg = document.getElementById('bgSetAllImg').checked;
+  const setAllAdjustments = document.getElementById('bgSetAllAdjustments').checked;
   const reader = new FileReader();
   reader.onload = (ev) => {
-    FD[curFrame].bg.imgSrc = ev.target.result;
-    FD[curFrame].bg.type = 'image';
-    updateBg();
+    saveState();
+    const src = ev.target.result;
+    
+    if (setAllImg) {
+      TAB_ORDER.forEach(f => {
+        if (FD[f] && FD[f].bg) {
+          FD[f].bg.imgSrc = src;
+          FD[f].bg.type = 'image';
+          FD[f].bg.brightness = 100;
+          FD[f].bg.contrast = 100;
+          FD[f].bg.saturate = 100;
+          FD[f].bg.blur = 0;
+          FD[f].bg.opacity = 100;
+        }
+      });
+    } else {
+      FD[curFrame].bg.imgSrc = src;
+      FD[curFrame].bg.type = 'image';
+      FD[curFrame].bg.brightness = 100;
+      FD[curFrame].bg.contrast = 100;
+      FD[curFrame].bg.saturate = 100;
+      FD[curFrame].bg.blur = 0;
+      FD[curFrame].bg.opacity = 100;
+      
+      if (setAllAdjustments) {
+        TAB_ORDER.forEach(f => {
+          if (FD[f] && FD[f].bg) {
+            FD[f].bg.brightness = 100;
+            FD[f].bg.contrast = 100;
+            FD[f].bg.saturate = 100;
+            FD[f].bg.blur = 0;
+            FD[f].bg.opacity = 100;
+          }
+        });
+      }
+    }
+    
+    document.getElementById('bgType').value = 'image';
+    updateBg(false);
     renderBgControls();
     renderFrame();
   };
@@ -961,6 +1165,7 @@ function getElById(id) {
 
 function deleteSelected() {
   if (!selectedEl) return;
+  saveState();
   FD[curFrame].elements = FD[curFrame].elements.filter(e => e.id !== selectedEl);
   selectedEl = null;
   renderFrame();
@@ -971,6 +1176,7 @@ function duplicateSelected() {
   if (!selectedEl) return;
   const src = getElById(selectedEl);
   if (!src) return;
+  saveState();
   const dup = { ...src, id: 'el_' + (++elIdCounter), x: src.x + 10, y: src.y + 10, zIndex: ++elIdCounter };
   FD[curFrame].elements.push(dup);
   selectElement(dup.id);
@@ -980,20 +1186,43 @@ function duplicateSelected() {
 function bringForward() {
   if (!selectedEl) return;
   const el = getElById(selectedEl);
-  if (el) el.zIndex += 2;
+  if (el) {
+    saveState();
+    el.zIndex += 2;
+  }
   renderFrame();
 }
 
 function sendBackward() {
   if (!selectedEl) return;
   const el = getElById(selectedEl);
-  if (el) el.zIndex = Math.max(1, el.zIndex - 2);
+  if (el) {
+    saveState();
+    el.zIndex = Math.max(1, el.zIndex - 2);
+  }
   renderFrame();
 }
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
-  if (e.target.isContentEditable) return;
+  if (e.target.isContentEditable || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  
+  // Undo / Redo keybindings
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    e.preventDefault();
+    if (e.shiftKey) {
+      redo();
+    } else {
+      undo();
+    }
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+    e.preventDefault();
+    redo();
+    return;
+  }
+
   if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
   if (e.key === 'Escape') deselectAll();
 });
@@ -1031,7 +1260,8 @@ function renderBgControls() {
   document.getElementById('bgImgOpts').style.display = bg.type === 'image' ? 'block' : 'none';
 }
 
-function updateBg() {
+function updateBg(commit = false) {
+  if (commit) saveState();
   const bg = FD[curFrame].bg;
   bg.type = document.getElementById('bgType').value;
   bg.color = document.getElementById('bgColor').value;
@@ -1051,6 +1281,46 @@ function updateBg() {
   bg.blur = parseInt(document.getElementById('bgBlur').value);
   bg.opacity = parseInt(document.getElementById('bgOpacity').value);
 
+  // Apply adjustments to all pages if checked
+  const setAllAdjustments = document.getElementById('bgSetAllAdjustments').checked;
+  if (setAllAdjustments) {
+    TAB_ORDER.forEach(f => {
+      if (FD[f] && FD[f].bg) {
+        FD[f].bg.brightness = bg.brightness;
+        FD[f].bg.contrast = bg.contrast;
+        FD[f].bg.saturate = bg.saturate;
+        FD[f].bg.blur = bg.blur;
+        FD[f].bg.opacity = bg.opacity;
+      }
+    });
+  }
+
+  renderBgControls();
+  renderFrame();
+}
+
+function resetBgAdjustments() {
+  saveState();
+  const bg = FD[curFrame].bg;
+  bg.brightness = 100;
+  bg.contrast = 100;
+  bg.saturate = 100;
+  bg.blur = 0;
+  bg.opacity = 100;
+  
+  const setAllAdjustments = document.getElementById('bgSetAllAdjustments').checked;
+  if (setAllAdjustments) {
+    TAB_ORDER.forEach(f => {
+      if (FD[f] && FD[f].bg) {
+        FD[f].bg.brightness = 100;
+        FD[f].bg.contrast = 100;
+        FD[f].bg.saturate = 100;
+        FD[f].bg.blur = 0;
+        FD[f].bg.opacity = 100;
+      }
+    });
+  }
+  
   renderBgControls();
   renderFrame();
 }
@@ -1158,11 +1428,23 @@ function renderElemProps() {
         <input type="range" class="pp-input" min="0.1" max="3.0" step="0.1" value="${el.animationDuration||0.8}" oninput="setProp('animationDuration',+this.value);this.nextElementSibling.textContent=this.value+'s'"><span class="pp-range-val">${el.animationDuration||0.8}s</span>
       </div>
       <div class="pp-row"><span class="pp-label">Text</span><textarea class="pp-input" style="min-height:40px;resize:vertical;" onchange="setProp('text',this.value)">${escHtml(el.text)}</textarea></div>
+      <div class="pp-row"><span class="pp-label">S-Blur</span><input type="range" class="pp-input" min="0" max="30" value="${el.shadowBlur||0}" oninput="setProp('shadowBlur',+this.value,false);this.nextElementSibling.textContent=this.value+'px';document.getElementById('textShadowOpts').style.display=this.value>0?'block':'none'"><span class="pp-range-val">${el.shadowBlur||0}px</span></div>
+      <div id="textShadowOpts" style="${(el.shadowBlur||0)===0?'display:none':''}">
+        <div class="pp-row"><span class="pp-label">S-Color</span><input type="color" class="pp-input" value="${toHex(el.shadowColor||'#000000')}" onchange="setProp('shadowColor',this.value)"></div>
+        <div class="pp-row"><span class="pp-label">S-OffsetX</span><input type="range" class="pp-input" min="-20" max="20" value="${el.shadowOffsetX??3}" oninput="setProp('shadowOffsetX',+this.value,false);this.nextElementSibling.textContent=this.value+'px'"><span class="pp-range-val">${el.shadowOffsetX??3}px</span></div>
+        <div class="pp-row"><span class="pp-label">S-OffsetY</span><input type="range" class="pp-input" min="-20" max="20" value="${el.shadowOffsetY??3}" oninput="setProp('shadowOffsetY',+this.value,false);this.nextElementSibling.textContent=this.value+'px'"><span class="pp-range-val">${el.shadowOffsetY??3}px</span></div>
+      </div>
     `;
   } else if (el.type === 'image') {
     html += `
       <div class="pp-row"><button class="pp-btn primary" onclick="pendingImgElId=null;document.getElementById('fileInput').click()">Upload / Replace Image</button></div>
       <div class="pp-row"><span class="pp-label">Radius</span><input type="range" class="pp-input" min="0" max="50" value="${el.borderRadius||0}" oninput="setProp('borderRadius',+this.value);this.nextElementSibling.textContent=this.value+'px'"><span class="pp-range-val">${el.borderRadius||0}px</span></div>
+      <div class="pp-row"><span class="pp-label">S-Blur</span><input type="range" class="pp-input" min="0" max="30" value="${el.shadowBlur||0}" oninput="setProp('shadowBlur',+this.value,false);this.nextElementSibling.textContent=this.value+'px';document.getElementById('imgShadowOpts').style.display=this.value>0?'block':'none'"><span class="pp-range-val">${el.shadowBlur||0}px</span></div>
+      <div id="imgShadowOpts" style="${(el.shadowBlur||0)===0?'display:none':''}">
+        <div class="pp-row"><span class="pp-label">S-Color</span><input type="color" class="pp-input" value="${toHex(el.shadowColor||'#000000')}" onchange="setProp('shadowColor',this.value)"></div>
+        <div class="pp-row"><span class="pp-label">S-OffsetX</span><input type="range" class="pp-input" min="-20" max="20" value="${el.shadowOffsetX??3}" oninput="setProp('shadowOffsetX',+this.value,false);this.nextElementSibling.textContent=this.value+'px'"><span class="pp-range-val">${el.shadowOffsetX??3}px</span></div>
+        <div class="pp-row"><span class="pp-label">S-OffsetY</span><input type="range" class="pp-input" min="-20" max="20" value="${el.shadowOffsetY??3}" oninput="setProp('shadowOffsetY',+this.value,false);this.nextElementSibling.textContent=this.value+'px'"><span class="pp-range-val">${el.shadowOffsetY??3}px</span></div>
+      </div>
     `;
   } else if (el.type === 'shape') {
     html += `
@@ -1244,6 +1526,7 @@ function loadQ() {
 }
 
 function saveQData() {
+  saveState();
   const d = QD[curQ];
   d.q = document.getElementById('eQ').value;
   d.a = document.getElementById('eA').value;
@@ -1613,6 +1896,18 @@ function drawSingleFrame(frameId, segment, frameOffset) {
   elements.forEach(el => {
     ctx.save();
     
+    if (el.shadowBlur > 0) {
+      ctx.shadowColor = el.shadowColor || '#000000';
+      ctx.shadowBlur = el.shadowBlur * scale;
+      ctx.shadowOffsetX = (el.shadowOffsetX ?? 3) * scale;
+      ctx.shadowOffsetY = (el.shadowOffsetY ?? 3) * scale;
+    } else {
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+    }
+    
     let baseOpacity = el.opacity ?? 1;
     const animDur = el.animationDuration || 0.8;
     const animFrames = Math.round(animDur * 30);
@@ -1745,6 +2040,60 @@ renderElemProps();
 renderQTabs();
 loadQ();
 playTextAnimations();
+
+// Properties panel event delegation for Undo/Redo snapshots
+const propsPanelEl = document.getElementById('propsPanel');
+
+propsPanelEl.addEventListener('mousedown', (e) => {
+  if (e.target.classList.contains('pp-input') || e.target.classList.contains('pp-select')) {
+    if (!sliderSnap) {
+      sliderSnap = {
+        FD: JSON.parse(JSON.stringify(FD)),
+        QD: JSON.parse(JSON.stringify(QD)),
+        curFrame: curFrame,
+        selectedEl: selectedEl
+      };
+    }
+  }
+});
+
+propsPanelEl.addEventListener('touchstart', (e) => {
+  if (e.target.classList.contains('pp-input') || e.target.classList.contains('pp-select')) {
+    if (!sliderSnap) {
+      sliderSnap = {
+        FD: JSON.parse(JSON.stringify(FD)),
+        QD: JSON.parse(JSON.stringify(QD)),
+        curFrame: curFrame,
+        selectedEl: selectedEl
+      };
+    }
+  }
+});
+
+propsPanelEl.addEventListener('focusin', (e) => {
+  if (e.target.classList.contains('pp-input') || e.target.classList.contains('pp-select')) {
+    if (!sliderSnap) {
+      sliderSnap = {
+        FD: JSON.parse(JSON.stringify(FD)),
+        QD: JSON.parse(JSON.stringify(QD)),
+        curFrame: curFrame,
+        selectedEl: selectedEl
+      };
+    }
+  }
+});
+
+propsPanelEl.addEventListener('change', (e) => {
+  if (e.target.classList.contains('pp-input') || e.target.classList.contains('pp-select')) {
+    if (sliderSnap) {
+      undoStack.push(sliderSnap);
+      if (undoStack.length > MAX_HISTORY) undoStack.shift();
+      redoStack.length = 0;
+      updateUndoRedoButtons();
+      sliderSnap = null;
+    }
+  }
+});
 </script>
 
 </body>
